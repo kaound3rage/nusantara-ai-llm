@@ -1,7 +1,7 @@
 🌏 NusantaraAI
 AI-Powered Indonesian Tourism Recommendation System
 
-Test Project — LKS Cloud Computing 2025
+Test Project 
 
 NusantaraAI adalah sistem rekomendasi destinasi wisata Indonesia yang memanfaatkan Machine Learning dan Large Language Model (LLM) untuk memberikan rekomendasi wisata yang relevan berdasarkan preferensi pengguna dan riwayat interaksi.
 
