@@ -1,0 +1,367 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  NusantaraAI - Storage & Compute Stack
+  S3 Bucket, DynamoDB Tables, EC2, Auto Scaling
+
+Parameters:
+  NamaPeserta:
+    Type: String
+    Default: "namakamu"
+  NamaProvinsi:
+    Type: String
+    Default: "jawatengah"
+  IPWhitelistLogs:
+    Type: String
+    Default: "203.0.113.0/24"
+    Description: "IP yang diizinkan akses folder logs/"
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "Nama Key Pair untuk EC2"
+
+Resources:
+
+  # ════════════════════════════════════════════════
+  # S3 BUCKET - Data Lake NusantaraAI
+  # ════════════════════════════════════════════════
+  NusantaraBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}"
+      # Aktifkan versioning untuk model artifacts
+      VersioningConfiguration:
+        Status: Enabled
+      # Enkripsi server-side
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      # Lifecycle policy untuk folder models/
+      LifecycleConfiguration:
+        Rules:
+          - Id: ModelsArchivePolicy
+            Prefix: models/
+            Status: Enabled
+            Transitions:
+              - Days: 30
+                StorageClass: STANDARD_IA
+            ExpirationInDays: 365
+          - Id: LogsCleanup
+            Prefix: logs/
+            Status: Enabled
+            ExpirationInDays: 90
+      Tags:
+        - Key: Project
+          Value: NusantaraAI
+        - Key: Environment
+          Value: Production
+
+  # Bucket Policy: public raw-data & models, private lainnya
+  NusantaraBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref NusantaraBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Public READ untuk raw-data/
+          - Sid: PublicReadRawData
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${NusantaraBucket.Arn}/raw-data/*"
+          # Public READ untuk models/
+          - Sid: PublicReadModels
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${NusantaraBucket.Arn}/models/*"
+          # Restrict logs/ hanya dari IP tertentu
+          - Sid: DenyLogsNonWhitelistedIP
+            Effect: Deny
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${NusantaraBucket.Arn}/logs/*"
+            Condition:
+              NotIpAddress:
+                aws:SourceIp:
+                  - !Ref IPWhitelistLogs
+          # Deny semua akses ke processed-data/ kecuali dari akun AWS ini
+          - Sid: DenyProcessedDataPublic
+            Effect: Deny
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${NusantaraBucket.Arn}/processed-data/*"
+            Condition:
+              StringNotEquals:
+                aws:PrincipalAccount: !Ref AWS::AccountId
+
+  # ════════════════════════════════════════════════
+  # DYNAMODB TABLES
+  # ════════════════════════════════════════════════
+
+  # Tabel 1: Destination Embeddings (vector ML)
+  DestinationEmbeddings:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: DestinationEmbeddings
+      AttributeDefinitions:
+        - AttributeName: destination_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: destination_id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      Tags:
+        - Key: Project
+          Value: NusantaraAI
+
+  # Tabel 2: User Interactions (real-time, high write)
+  UserInteractionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UserInteractions
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 10
+        WriteCapacityUnits: 10
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: NusantaraAI
+
+  # Tabel 3: User Recommendations
+  UserRecommendationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UserRecommendations
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      Tags:
+        - Key: Project
+          Value: NusantaraAI
+
+  # Tabel 4: ML Prediction Results (Lambda output)
+  MLPredictionResults:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MLPredictionResults
+      AttributeDefinitions:
+        - AttributeName: prediction_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: prediction_id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # Tabel 5: LLM Chat Sessions (Ollama history)
+  LLMChatSessions:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: LLMChatSessions
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # Tabel 6: Step Functions Workflow Status
+  WorkflowStatus:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: WorkflowStatus
+      AttributeDefinitions:
+        - AttributeName: workflow_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: workflow_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # ════════════════════════════════════════════════
+  # EC2 INSTANCE - Ollama LLM Server
+  # ════════════════════════════════════════════════
+  OllamaEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c02fb55956c7d316   # Amazon Linux 2 (us-east-1)
+      InstanceType: t3.large
+      KeyName: !Ref KeyPairName
+      SubnetId: !ImportValue NusantaraPublicSubnet1
+      SecurityGroupIds:
+        - !ImportValue NusantaraSGApps
+      IamInstanceProfile: LabInstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 50    # 50GB untuk model Ollama
+            VolumeType: gp3
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          # Update sistem
+          yum update -y
+
+          # Install Docker
+          amazon-linux-extras install docker -y
+          service docker start
+          systemctl enable docker
+          usermod -a -G docker ec2-user
+
+          # Install Ollama
+          curl -fsSL https://ollama.ai/install.sh | sh
+
+          # Start Ollama service
+          systemctl start ollama
+          systemctl enable ollama
+
+          # Pull model llama2 (atau model lain yang dipilih)
+          # Catatan: ini butuh waktu ~5-10 menit
+          sleep 30
+          ollama pull llama2
+
+          # Install Python dependencies untuk aplikasi
+          pip3 install flask boto3 requests pandas numpy scikit-learn
+
+          # Install AWS CLI
+          pip3 install awscli
+
+          echo "Ollama EC2 setup complete" > /tmp/setup_done.txt
+      Tags:
+        - Key: Name
+          Value: !Sub "nusantaraai-ollama-${NamaPeserta}"
+        - Key: Project
+          Value: NusantaraAI
+
+  # Elastic IP untuk Ollama server
+  OllamaEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref OllamaEC2Instance
+      Domain: vpc
+
+  # ════════════════════════════════════════════════
+  # EC2 AUTO SCALING - Application Server
+  # ════════════════════════════════════════════════
+  AppLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "nusantaraai-lt-${NamaPeserta}"
+      LaunchTemplateData:
+        ImageId: ami-0c02fb55956c7d316
+        InstanceType: t3.large
+        KeyName: !Ref KeyPairName
+        SecurityGroupIds:
+          - !ImportValue NusantaraSGApps
+        IamInstanceProfile:
+          Name: LabInstanceProfile
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            amazon-linux-extras install docker -y
+            service docker start
+            systemctl enable docker
+            usermod -a -G docker ec2-user
+
+            # Login ke ECR
+            aws ecr get-login-password --region ${AWS::Region} | \
+              docker login --username AWS --password-stdin \
+              ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+
+            # Pull dan jalankan container aplikasi
+            docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/nusantaraai-ecr-${NamaProvinsi}-${NamaPeserta}:latest
+            docker run -d \
+              -p 5000:5000 \
+              -e OLLAMA_URL=http://${OllamaEC2Instance.PublicIp}:11434 \
+              -e AWS_DEFAULT_REGION=${AWS::Region} \
+              --name nusantaraai-app \
+              ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/nusantaraai-ecr-${NamaProvinsi}-${NamaPeserta}:latest
+
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "nusantaraai-app-${NamaPeserta}"
+
+  NusantaraAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub "nusantaraai-asg-${NamaPeserta}"
+      LaunchTemplate:
+        LaunchTemplateId: !Ref AppLaunchTemplate
+        Version: !GetAtt AppLaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 4
+      DesiredCapacity: 2
+      VPCZoneIdentifier:
+        - !ImportValue NusantaraPublicSubnet1
+        - !ImportValue NusantaraPublicSubnet2
+      TargetGroupARNs:
+        - !ImportValue NusantaraTGBlue
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub "nusantaraai-asg-${NamaPeserta}"
+          PropagateAtLaunch: true
+
+  # Auto Scaling Policy - Scale Up
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref NusantaraAutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 70.0
+
+Outputs:
+  BucketName:
+    Value: !Ref NusantaraBucket
+    Export:
+      Name: NusantaraBucketName
+  OllamaPublicIP:
+    Value: !GetAtt OllamaEC2Instance.PublicIp
+    Export:
+      Name: NusantaraOllamaIP
+  DestinationEmbeddingsTable:
+    Value: !Ref DestinationEmbeddings
+    Export:
+      Name: NusantaraDestEmbTable

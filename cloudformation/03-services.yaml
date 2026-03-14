@@ -1,0 +1,635 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  NusantaraAI - Services Stack
+  Glue, Lambda, API Gateway, SNS, Step Functions, CloudWatch
+
+Parameters:
+  NamaPeserta:
+    Type: String
+    Default: "namakamu"
+  NamaProvinsi:
+    Type: String
+    Default: "jawatengah"
+  OllamaIP:
+    Type: String
+    Description: "Public IP dari EC2 Ollama"
+    Default: "1.2.3.4"
+  EmailNotifikasi:
+    Type: String
+    Default: "peserta@example.com"
+
+Resources:
+
+  # ════════════════════════════════════════════════
+  # AWS GLUE - Data Catalog & ETL
+  # ════════════════════════════════════════════════
+
+  NusantaraGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: nusantaraai_database
+        Description: "Katalog data untuk pipeline ML NusantaraAI - Sistem Rekomendasi Wisata"
+
+  NusantaraGlueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: nusantaraai-crawler
+      Role: LabRole
+      DatabaseName: !Ref NusantaraGlueDatabase
+      Description: "Crawler untuk scan dataset raw dari S3"
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}/raw-data/"
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: LOG
+      Schedule:
+        ScheduleExpression: "cron(0 2 * * ? *)"  # Setiap hari jam 02:00 UTC
+
+  NusantaraGlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: nusantaraai-etl-job
+      Role: LabRole
+      Description: "ETL Job PySpark - Transformasi dataset wisata untuk ML"
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub "s3://nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}/scripts/etl_script.py"
+        PythonVersion: "3"
+      DefaultArguments:
+        "--job-language": "python"
+        "--S3_INPUT_PATH": !Sub "s3://nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}/raw-data/"
+        "--S3_OUTPUT_PATH": !Sub "s3://nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}/processed-data/"
+        "--DATABASE_NAME": "nusantaraai_database"
+        "--enable-metrics": ""
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-spark-ui": "true"
+        "--spark-event-logs-path": !Sub "s3://nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}/logs/spark-ui/"
+      GlueVersion: "4.0"
+      NumberOfWorkers: 2
+      WorkerType: G.1X
+      Timeout: 60  # menit
+      Tags:
+        Project: NusantaraAI
+
+  # ════════════════════════════════════════════════
+  # SNS - Notifikasi
+  # ════════════════════════════════════════════════
+
+  NusantaraSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "nusantaraai-sns-${NamaProvinsi}-${NamaPeserta}"
+      DisplayName: "NusantaraAI Alerts & Notifications"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref EmailNotifikasi
+
+  # ════════════════════════════════════════════════
+  # LAMBDA FUNCTIONS
+  # ════════════════════════════════════════════════
+
+  # Lambda Layer untuk dependencies
+  PythonDepsLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: nusantaraai-python-deps
+      Description: "Scikit-learn, pandas, numpy untuk NusantaraAI Lambda"
+      CompatibleRuntimes:
+        - python3.12
+      Content:
+        S3Bucket: !Sub "nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}"
+        S3Key: "lambda/layers/python_deps.zip"
+
+  # Lambda 1: ML Prediction (Rekomendasi)
+  LambdaPrediction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: nusantaraai-ml-prediction
+      Description: "Rekomendasi destinasi wisata menggunakan Hybrid ML Model"
+      Runtime: python3.12
+      Handler: lambda_functions.lambda_handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Code:
+        S3Bucket: !Sub "nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}"
+        S3Key: "lambda/prediction.zip"
+      Layers:
+        - !Ref PythonDepsLayer
+      Environment:
+        Variables:
+          S3_BUCKET: !Sub "nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}"
+          MODEL_KEY: "models/hybrid_model.pkl"
+          DYNAMODB_TABLE: "MLPredictionResults"
+          AWS_DEFAULT_REGION: !Ref AWS::Region
+      MemorySize: 1024
+      Timeout: 30
+      Tags:
+        Project: NusantaraAI
+
+  # Lambda 2: LLM Chat (Ollama)
+  LambdaLLMChat:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: nusantaraai-llm-chat
+      Description: "Chat dengan LLM Ollama untuk saran wisata"
+      Runtime: python3.12
+      Handler: lambda_functions.lambda_handler_llm
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Code:
+        S3Bucket: !Sub "nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}"
+        S3Key: "lambda/llm_chat.zip"
+      Environment:
+        Variables:
+          OLLAMA_URL: !Sub "http://${OllamaIP}:11434"
+          S3_BUCKET: !Sub "nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}"
+          MODEL_KEY: "models/hybrid_model.pkl"
+          SESSIONS_TABLE: "LLMChatSessions"
+      MemorySize: 512
+      Timeout: 60  # Ollama butuh waktu lebih lama
+      Tags:
+        Project: NusantaraAI
+
+  # Lambda 3: Workflow Trigger (Step Functions)
+  LambdaWorkflowTrigger:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: nusantaraai-workflow-trigger
+      Description: "Trigger Step Functions workflow untuk retraining model"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import time
+
+          sfn = boto3.client("stepfunctions")
+          SNS_ARN = os.environ.get("SNS_ARN", "")
+
+          def handler(event, context):
+              """Trigger Step Functions ML Pipeline."""
+              execution_name = f"nusantaraai-training-{int(time.time())}"
+              sfn_arn = os.environ.get("STEP_FUNCTION_ARN", "")
+
+              try:
+                  response = sfn.start_execution(
+                      stateMachineArn=sfn_arn,
+                      name=execution_name,
+                      input=json.dumps({
+                          "trigger": event.get("source", "manual"),
+                          "timestamp": str(time.time()),
+                          "bucket": os.environ.get("S3_BUCKET", ""),
+                      })
+                  )
+                  return {
+                      "statusCode": 200,
+                      "body": json.dumps({
+                          "execution_arn": response["executionArn"],
+                          "name": execution_name
+                      })
+                  }
+              except Exception as e:
+                  return {"statusCode": 500, "body": str(e)}
+      Environment:
+        Variables:
+          S3_BUCKET: !Sub "nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}"
+          SNS_ARN: !Ref NusantaraSNSTopic
+          STEP_FUNCTION_ARN: !Ref MLPipelineStateMachine
+      MemorySize: 128
+      Timeout: 30
+
+  # ════════════════════════════════════════════════
+  # API GATEWAY
+  # ════════════════════════════════════════════════
+
+  NusantaraRestAPI:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: nusantaraai-ml-api
+      Description: "REST API untuk sistem rekomendasi wisata NusantaraAI"
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # Resource /recommendations
+  RecommendationsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref NusantaraRestAPI
+      ParentId: !GetAtt NusantaraRestAPI.RootResourceId
+      PathPart: recommendations
+
+  RecommendationsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref NusantaraRestAPI
+      ResourceId: !Ref RecommendationsResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+          - LambdaArn: !GetAtt LambdaPrediction.Arn
+
+  RecommendationsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref NusantaraRestAPI
+      ResourceId: !Ref RecommendationsResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,x-api-key'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Resource /chat
+  ChatResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref NusantaraRestAPI
+      ParentId: !GetAtt NusantaraRestAPI.RootResourceId
+      PathPart: chat
+
+  ChatMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref NusantaraRestAPI
+      ResourceId: !Ref ChatResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+          - LambdaArn: !GetAtt LambdaLLMChat.Arn
+
+  # Lambda Permission untuk API Gateway
+  LambdaPredictionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaPrediction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${NusantaraRestAPI}/*/*/recommendations"
+
+  LambdaLLMPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaLLMChat.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${NusantaraRestAPI}/*/*/chat"
+
+  # API Deployment
+  APIDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - RecommendationsMethod
+      - ChatMethod
+    Properties:
+      RestApiId: !Ref NusantaraRestAPI
+      Description: "Production deployment NusantaraAI"
+
+  APIStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref NusantaraRestAPI
+      DeploymentId: !Ref APIDeployment
+      StageName: prod
+      Description: "Production stage"
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          MetricsEnabled: true
+          DataTraceEnabled: true
+          LoggingLevel: INFO
+          ThrottlingBurstLimit: 100
+          ThrottlingRateLimit: 50
+
+  # API Key
+  NusantaraAPIKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: nusantaraai-api-key
+      Description: "API Key untuk akses NusantaraAI API"
+      Enabled: true
+
+  # Usage Plan
+  NusantaraUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: nusantaraai-usage-plan
+      Description: "Usage plan dengan rate limiting"
+      ApiStages:
+        - ApiId: !Ref NusantaraRestAPI
+          Stage: !Ref APIStage
+      Throttle:
+        BurstLimit: 100
+        RateLimit: 50
+      Quota:
+        Limit: 10000
+        Period: MONTH
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref NusantaraAPIKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref NusantaraUsagePlan
+
+  # ════════════════════════════════════════════════
+  # AWS STEP FUNCTIONS - ML Pipeline Orchestration
+  # ════════════════════════════════════════════════
+
+  MLPipelineStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "nusantaraai-ml-pipeline-${NamaPeserta}"
+      RoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Definition:
+        Comment: "NusantaraAI ML Pipeline - Glue ETL → SageMaker Training → Notifikasi"
+        StartAt: RunGlueETL
+        States:
+          RunGlueETL:
+            Type: Task
+            Resource: "arn:aws:states:::glue:startJobRun.sync"
+            Parameters:
+              JobName: nusantaraai-etl-job
+            ResultPath: "$.glue_result"
+            Next: CheckGlueStatus
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                Next: NotifyFailure
+                ResultPath: "$.error"
+
+          CheckGlueStatus:
+            Type: Choice
+            Choices:
+              - Variable: "$.glue_result.JobRunState"
+                StringEquals: SUCCEEDED
+                Next: StartSageMakerTraining
+            Default: NotifyFailure
+
+          StartSageMakerTraining:
+            Type: Task
+            Resource: "arn:aws:states:::sagemaker:createProcessingJob.sync"
+            Parameters:
+              ProcessingJobName.$: "States.Format('nusantaraai-training-{}', $$.Execution.Name)"
+              RoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+              AppSpecification:
+                ImageUri: "683313688378.dkr.ecr.us-east-1.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3"
+                ContainerEntrypoint:
+                  - "python3"
+                  - "/opt/ml/processing/code/train_model.py"
+              ProcessingInputs:
+                - InputName: "code"
+                  S3Input:
+                    S3Uri: !Sub "s3://nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}/scripts/train_model.py"
+                    LocalPath: "/opt/ml/processing/code"
+                    S3DataType: S3Prefix
+                    S3InputMode: File
+              ProcessingOutputs:
+                - OutputName: "model"
+                  S3Output:
+                    S3Uri: !Sub "s3://nusantaraai-ml-${NamaProvinsi}-${NamaPeserta}/models/"
+                    LocalPath: "/opt/ml/processing/output"
+                    S3UploadMode: EndOfJob
+              ProcessingResources:
+                ClusterConfig:
+                  InstanceCount: 1
+                  InstanceType: ml.t3.medium
+                  VolumeSizeInGB: 20
+            ResultPath: "$.training_result"
+            Next: NotifySuccess
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                Next: NotifyFailure
+                ResultPath: "$.error"
+
+          NotifySuccess:
+            Type: Task
+            Resource: "arn:aws:states:::sns:publish"
+            Parameters:
+              TopicArn: !Ref NusantaraSNSTopic
+              Subject: "✅ NusantaraAI - Model Training Berhasil"
+              Message.$: |
+                States.Format(
+                  'Pipeline ML NusantaraAI selesai dengan sukses!\n\nExecution: {}\nTimestamp: {}',
+                  $$.Execution.Name,
+                  $$.Execution.StartTime
+                )
+            End: true
+
+          NotifyFailure:
+            Type: Task
+            Resource: "arn:aws:states:::sns:publish"
+            Parameters:
+              TopicArn: !Ref NusantaraSNSTopic
+              Subject: "❌ NusantaraAI - Pipeline ML Gagal"
+              Message.$: |
+                States.Format(
+                  'Pipeline ML NusantaraAI GAGAL!\n\nExecution: {}\nError: {}',
+                  $$.Execution.Name,
+                  $.error
+                )
+            Next: PipelineFailed
+
+          PipelineFailed:
+            Type: Fail
+            Error: "PipelineFailed"
+            Cause: "ML Pipeline gagal, lihat CloudWatch logs untuk detail"
+
+  # ════════════════════════════════════════════════
+  # CLOUDWATCH - Monitoring & Alarms
+  # ════════════════════════════════════════════════
+
+  # Dashboard utama
+  NusantaraDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "nusantaraai-dashboard-${NamaPeserta}"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Lambda - Invocations & Errors",
+                "metrics": [
+                  ["AWS/Lambda","Invocations","FunctionName","nusantaraai-ml-prediction"],
+                  ["AWS/Lambda","Errors","FunctionName","nusantaraai-ml-prediction"],
+                  ["AWS/Lambda","Invocations","FunctionName","nusantaraai-llm-chat"],
+                  ["AWS/Lambda","Errors","FunctionName","nusantaraai-llm-chat"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Lambda - Latency (ms)",
+                "metrics": [
+                  ["AWS/Lambda","Duration","FunctionName","nusantaraai-ml-prediction","Stat","Average"],
+                  ["AWS/Lambda","Duration","FunctionName","nusantaraai-llm-chat","Stat","p99"]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "API Gateway - Requests & 4XX/5XX",
+                "metrics": [
+                  ["AWS/ApiGateway","Count","ApiName","nusantaraai-ml-api"],
+                  ["AWS/ApiGateway","4XXError","ApiName","nusantaraai-ml-api"],
+                  ["AWS/ApiGateway","5XXError","ApiName","nusantaraai-ml-api"]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "DynamoDB - Read/Write Capacity",
+                "metrics": [
+                  ["AWS/DynamoDB","ConsumedReadCapacityUnits","TableName","UserInteractions"],
+                  ["AWS/DynamoDB","ConsumedWriteCapacityUnits","TableName","UserInteractions"],
+                  ["AWS/DynamoDB","ConsumedReadCapacityUnits","TableName","MLPredictionResults"]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            }
+          ]
+        }
+
+  # Alarm: Lambda Error Rate tinggi
+  LambdaPredictionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: nusantaraai-lambda-prediction-errors
+      AlarmDescription: "Lambda prediction error rate tinggi"
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: nusantaraai-ml-prediction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NusantaraSNSTopic
+      TreatMissingData: notBreaching
+
+  # Alarm: API Gateway 5XX
+  APIGateway5XXAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: nusantaraai-api-5xx-errors
+      AlarmDescription: "API Gateway 5XX errors tinggi"
+      MetricName: 5XXError
+      Namespace: AWS/ApiGateway
+      Dimensions:
+        - Name: ApiName
+          Value: nusantaraai-ml-api
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NusantaraSNSTopic
+
+  # Alarm: Lambda Latency tinggi (p99 > 25 detik = Ollama lambat)
+  LambdaLLMLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: nusantaraai-llm-latency-high
+      AlarmDescription: "LLM Chat latency terlalu tinggi (Ollama mungkin overload)"
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: nusantaraai-llm-chat
+      ExtendedStatistic: p99
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 25000  # 25 detik dalam ms
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NusantaraSNSTopic
+
+  # EventBridge Rule - Trigger pipeline setiap minggu
+  WeeklyRetrainingRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: nusantaraai-weekly-retrain
+      Description: "Trigger ML pipeline retraining setiap Minggu jam 01:00 WIB"
+      ScheduleExpression: "cron(0 18 ? * SUN *)"  # 18:00 UTC = 01:00 WIB
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt LambdaWorkflowTrigger.Arn
+          Id: NusantaraRetrainingTrigger
+
+  RetrainingRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaWorkflowTrigger.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WeeklyRetrainingRule.Arn
+
+Outputs:
+  APIEndpoint:
+    Value: !Sub "https://${NusantaraRestAPI}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    Description: "Base URL API NusantaraAI"
+    Export:
+      Name: NusantaraAPIEndpoint
+
+  SNSTopicArn:
+    Value: !Ref NusantaraSNSTopic
+    Export:
+      Name: NusantaraSNSArn
+
+  StepFunctionArn:
+    Value: !Ref MLPipelineStateMachine
+    Export:
+      Name: NusantaraStepFunctionArn
+
+  GlueDatabaseName:
+    Value: !Ref NusantaraGlueDatabase
+    Export:
+      Name: NusantaraGlueDB

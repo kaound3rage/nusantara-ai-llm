@@ -1,0 +1,30 @@
+destination_id,nama_destinasi,provinsi,kategori,rating_rata_rata,harga_tiket_dewasa,durasi_kunjungan_jam,fasilitas,deskripsi,koordinat_lat,koordinat_lng,tersedia,musim_terbaik,min_umur,total_pengunjung_tahunan
+DST0001,Tanah Lot,Bali,Budaya,4.7,60000,2,"wifi,parkir,toilet,restoran",Destinasi wisata budaya unggulan di Bali,-2.642823,108.914997,True,Sepanjang Tahun,17,361583
+DST0002,Kuta Beach,Bali,Pantai,4.5,0,4,"wifi,parkir,toilet",Destinasi wisata pantai unggulan di Bali,-4.247636,120.296692,True,Sepanjang Tahun,12,1164469
+DST0003,Ubud Monkey Forest,Bali,Alam,4.6,80000,2,"parkir,toilet,guide",Destinasi wisata alam unggulan di Bali,-3.126872,113.907146,True,Sepanjang Tahun,0,1816160
+DST0004,Tegalalang Rice Terrace,Bali,Alam,4.4,20000,2,"parkir,toilet,warung",Destinasi wisata alam unggulan di Bali,-6.866677,95.777132,True,Mei-September,17,176248
+DST0005,Seminyak Beach,Bali,Pantai,4.5,0,3,"wifi,restoran,toilet",Destinasi wisata pantai unggulan di Bali,-6.915154,122.30918,True,Sepanjang Tahun,0,388340
+DST0006,Candi Borobudur,Yogyakarta,Sejarah,4.9,350000,3,"wifi,parkir,toilet,restoran,guide",Destinasi wisata sejarah unggulan di Yogyakarta,-7.297579,124.053445,True,Sepanjang Tahun,0,1335473
+DST0007,Candi Prambanan,Yogyakarta,Sejarah,4.8,350000,3,"wifi,parkir,toilet,restoran",Destinasi wisata sejarah unggulan di Yogyakarta,0.422108,128.958476,True,Sepanjang Tahun,0,334400
+DST0008,Malioboro,Yogyakarta,Kuliner,4.6,0,4,"toilet,atm,warung",Destinasi wisata kuliner unggulan di Yogyakarta,1.248182,124.763872,True,Sepanjang Tahun,17,1786989
+DST0009,Keraton Yogyakarta,Yogyakarta,Budaya,4.7,15000,2,"guide,toilet,parkir",Destinasi wisata budaya unggulan di Yogyakarta,-1.615536,130.071225,True,Sepanjang Tahun,5,1720184
+DST0010,Goa Pindul,Yogyakarta,Petualangan,4.5,70000,2,"guide,toilet,warung",Destinasi wisata petualangan unggulan di Yogyakarta,-0.011575,124.847376,True,Mei-September,0,1929750
+DST0011,Wayag Island,Raja Ampat,Bahari,4.9,500000,8,"guide,perahu",Destinasi wisata bahari unggulan di Raja Ampat,-4.281205,127.902357,True,Sepanjang Tahun,0,1840973
+DST0012,Pianemo,Raja Ampat,Bahari,4.8,250000,6,"guide,perahu,toilet",Destinasi wisata bahari unggulan di Raja Ampat,-7.256572,115.915353,True,April-Oktober,5,1018830
+DST0013,Pasir Timbul,Raja Ampat,Pantai,4.7,150000,4,"guide,perahu",Destinasi wisata pantai unggulan di Raja Ampat,-0.316974,122.116066,True,April-Oktober,17,1170310
+DST0014,Pulau Komodo,Labuan Bajo,Alam,4.9,150000,6,"guide,perahu,toilet",Destinasi wisata alam unggulan di Labuan Bajo,-2.129698,105.624517,True,Mei-September,17,1396957
+DST0015,Pink Beach,Labuan Bajo,Pantai,4.8,100000,4,"guide,perahu",Destinasi wisata pantai unggulan di Labuan Bajo,-5.310224,136.497527,True,April-Oktober,5,1507048
+DST0016,Padar Island,Labuan Bajo,Petualangan,4.8,100000,5,"guide,perahu,toilet",Destinasi wisata petualangan unggulan di Labuan Bajo,-5.18008,114.353264,True,Mei-September,17,1081712
+DST0017,Gunung Bromo,Bromo,Gunung,4.9,320000,8,"guide,toilet,warung,jeep",Destinasi wisata gunung unggulan di Bromo,-2.051074,134.663601,True,Sepanjang Tahun,5,410574
+DST0018,Bukit Teletubbies,Bromo,Alam,4.6,100000,3,"guide,toilet,jeep",Destinasi wisata alam unggulan di Bromo,-4.947648,126.763782,True,April-Oktober,17,937484
+DST0019,Danau Toba,Toba,Alam,4.8,25000,6,"wifi,parkir,toilet,restoran",Destinasi wisata alam unggulan di Toba,-6.020681,99.67182,True,April-Oktober,5,220029
+DST0020,Pulau Samosir,Toba,Budaya,4.7,50000,5,"guide,toilet,restoran",Destinasi wisata budaya unggulan di Toba,-5.109502,110.652126,True,April-Oktober,12,932701
+DST0021,Pantai Kuta Lombok,Lombok,Pantai,4.7,0,4,"parkir,toilet,warung",Destinasi wisata pantai unggulan di Lombok,-1.400749,96.505789,True,April-Oktober,0,1110580
+DST0022,Gunung Rinjani,Lombok,Gunung,4.9,150000,48,"guide,camping",Destinasi wisata gunung unggulan di Lombok,-3.476368,122.761189,True,Sepanjang Tahun,5,1093343
+DST0023,Gili Trawangan,Lombok,Bahari,4.7,20000,6,"wifi,toilet,restoran",Destinasi wisata bahari unggulan di Lombok,-5.624591,132.819728,True,Mei-September,0,662590
+DST0024,Pantai Tanjung Tinggi,Belitung,Pantai,4.8,15000,3,"parkir,toilet,warung",Destinasi wisata pantai unggulan di Belitung,-4.639733,118.418638,True,April-Oktober,0,170117
+DST0025,Pulau Lengkuas,Belitung,Bahari,4.7,200000,6,"perahu,toilet",Destinasi wisata bahari unggulan di Belitung,-5.230685,109.194164,True,Mei-September,0,1376086
+DST0026,Kota Tua Jakarta,Jakarta,Sejarah,4.4,5000,3,"wifi,parkir,toilet,guide",Destinasi wisata sejarah unggulan di Jakarta,1.157335,99.710526,True,April-Oktober,5,1369324
+DST0027,Kepulauan Seribu,Jakarta,Bahari,4.5,100000,8,"perahu,toilet,restoran",Destinasi wisata bahari unggulan di Jakarta,-0.170573,134.138261,True,April-Oktober,17,1133557
+DST0028,Pantai Cemara Wakatobi,Wakatobi,Bahari,4.9,100000,5,"guide,perahu,toilet",Destinasi wisata bahari unggulan di Wakatobi,1.900042,100.236219,True,Sepanjang Tahun,17,1727851
+DST0029,Pulau Hoga,Wakatobi,Bahari,4.8,150000,6,"guide,perahu,diving",Destinasi wisata bahari unggulan di Wakatobi,1.311135,119.555491,True,April-Oktober,0,1232176

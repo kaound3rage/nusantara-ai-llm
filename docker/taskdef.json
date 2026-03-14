@@ -1,0 +1,58 @@
+{
+  "family": "nusantaraai-task-jawatengah-namakamu",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/LabRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/LabRole",
+  "containerDefinitions": [
+    {
+      "name": "nusantaraai-app",
+      "image": "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/nusantaraai-ecr-jawatengah-namakamu:latest",
+      "portMappings": [
+        {
+          "containerPort": 5000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "S3_BUCKET",
+          "value": "nusantaraai-ml-jawatengah-namakamu"
+        },
+        {
+          "name": "AWS_DEFAULT_REGION",
+          "value": "us-east-1"
+        },
+        {
+          "name": "OLLAMA_URL",
+          "value": "http://OLLAMA_IP:11434"
+        },
+        {
+          "name": "MODEL_KEY",
+          "value": "models/hybrid_model.pkl"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/nusantaraai",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "app"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ],
+  "tags": [
+    {"key": "Project", "value": "NusantaraAI"},
+    {"key": "Environment", "value": "Production"}
+  ]
+}

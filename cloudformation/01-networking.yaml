@@ -1,0 +1,336 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  NusantaraAI - Networking Stack
+  VPC, Subnets, Security Groups, NAT, Load Balancer
+
+Parameters:
+  NamaPeserta:
+    Type: String
+    Description: "Nama peserta (huruf kecil tanpa spasi)"
+    Default: "namakamu"
+  NamaProvinsi:
+    Type: String
+    Description: "Nama provinsi (huruf kecil tanpa spasi)"
+    Default: "jawatengah"
+
+Resources:
+
+  # ────────────────────────────────────────────────
+  # VPC
+  # ────────────────────────────────────────────────
+  NusantaraVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.5.0.0/20
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "nusantaraai-${NamaProvinsi}-${NamaPeserta}"
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "nusantaraai-igw-${NamaPeserta}"
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref NusantaraVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ────────────────────────────────────────────────
+  # Subnets
+  # ────────────────────────────────────────────────
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NusantaraVPC
+      CidrBlock: 10.5.0.0/25
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: nusantaraai-public-subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NusantaraVPC
+      CidrBlock: 10.5.2.0/25
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: nusantaraai-public-subnet-2
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NusantaraVPC
+      CidrBlock: 10.5.1.0/25
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: nusantaraai-private-subnet-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NusantaraVPC
+      CidrBlock: 10.5.3.0/25
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: nusantaraai-private-subnet-2
+
+  # ────────────────────────────────────────────────
+  # Route Tables
+  # ────────────────────────────────────────────────
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NusantaraVPC
+      Tags:
+        - Key: Name
+          Value: nusantaraai-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # NAT Gateway untuk Private Subnets
+  NatEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: nusantaraai-nat
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NusantaraVPC
+      Tags:
+        - Key: Name
+          Value: nusantaraai-private-rt
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # ────────────────────────────────────────────────
+  # Security Groups
+  # ────────────────────────────────────────────────
+  SGLoadBalancer:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: nusantaraai-sg-lb
+      GroupDescription: Security group untuk Application Load Balancer
+      VpcId: !Ref NusantaraVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP public
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS public
+      Tags:
+        - Key: Name
+          Value: nusantaraai-sg-lb
+
+  SGApps:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: nusantaraai-sg-apps
+      GroupDescription: Security group untuk aplikasi NusantaraAI
+      VpcId: !Ref NusantaraVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref SGLoadBalancer
+          Description: Aplikasi Flask dari Load Balancer
+        - IpProtocol: tcp
+          FromPort: 11434
+          ToPort: 11434
+          CidrIp: 10.5.0.0/20
+          Description: Ollama LLM API (internal VPC only)
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH untuk administrasi
+      Tags:
+        - Key: Name
+          Value: nusantaraai-sg-apps
+
+  SGEC2Private:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: nusantaraai-sg-ec2-private
+      GroupDescription: Security group untuk EC2 di private subnet
+      VpcId: !Ref NusantaraVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref SGLoadBalancer
+      Tags:
+        - Key: Name
+          Value: nusantaraai-sg-ec2-private
+
+  # ────────────────────────────────────────────────
+  # Application Load Balancer
+  # ────────────────────────────────────────────────
+  NusantaraALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "nusantaraai-alb-${NamaPeserta}"
+      Type: application
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref SGLoadBalancer
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub "nusantaraai-alb-${NamaPeserta}"
+
+  TargetGroupBlue:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: nusantaraai-tg-blue
+      Port: 5000
+      Protocol: HTTP
+      VpcId: !Ref NusantaraVPC
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      TargetType: ip
+
+  TargetGroupGreen:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: nusantaraai-tg-green
+      Port: 5000
+      Protocol: HTTP
+      VpcId: !Ref NusantaraVPC
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      TargetType: ip
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref NusantaraALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupBlue
+
+  # ────────────────────────────────────────────────
+  # AWS PrivateLink (VPC Endpoint untuk S3 & DynamoDB)
+  # ────────────────────────────────────────────────
+  S3VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref NusantaraVPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+        - !Ref PublicRouteTable
+
+  DynamoDBVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref NusantaraVPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+Outputs:
+  VPCId:
+    Value: !Ref NusantaraVPC
+    Export:
+      Name: NusantaraVPCId
+  PublicSubnet1Id:
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: NusantaraPublicSubnet1
+  PublicSubnet2Id:
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: NusantaraPublicSubnet2
+  PrivateSubnet1Id:
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: NusantaraPrivateSubnet1
+  PrivateSubnet2Id:
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: NusantaraPrivateSubnet2
+  ALBDNSName:
+    Value: !GetAtt NusantaraALB.DNSName
+    Export:
+      Name: NusantaraALBDNS
+  TargetGroupBlueArn:
+    Value: !Ref TargetGroupBlue
+    Export:
+      Name: NusantaraTGBlue
+  TargetGroupGreenArn:
+    Value: !Ref TargetGroupGreen
+    Export:
+      Name: NusantaraTGGreen
+  SGAppsId:
+    Value: !Ref SGApps
+    Export:
+      Name: NusantaraSGApps
