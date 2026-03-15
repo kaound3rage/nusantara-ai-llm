@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "trained_at": "2026-03-15T09:01:22.895246",
+  "metrics": {
+    "precision_at_5": 0.0,
+    "coverage": 0.5862,
+    "users_evaluated": 50
+  },
+  "n_users": 2000,
+  "n_destinations": 29,
+  "n_interactions": 15000,
+  "algorithm": "Hybrid CF+CB",
+  "cf_algorithm": "UserAverage",
+  "cb_algorithm": "Cosine Similarity"
+}

@@ -41,9 +41,9 @@ except ImportError:
     print("⚠ Surprise tidak tersedia, pakai alternatif sederhana")
 
 # ─── Konfigurasi ──────────────────────────────────────────────────────────────
-S3_BUCKET    = os.environ.get("S3_BUCKET", "nusantaraai-ml-jawatengah-namakamu")
-S3_INPUT     = f"s3://{S3_BUCKET}/processed-data/"
-S3_MODEL_OUT = f"s3://{S3_BUCKET}/models/"
+S3_BUCKET    = "nusantara-ai"
+S3_INPUT     = "s3://nusantara-ai/processed_data/"
+S3_MODEL_OUT = "s3://nusantara-ai/models/"
 REGION       = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
 s3 = boto3.client("s3", region_name=REGION)
@@ -79,9 +79,9 @@ def download_parquet_from_s3(s3_path: str) -> pd.DataFrame:
 
 # Load semua processed data
 try:
-    users_df        = download_parquet_from_s3(f"{S3_INPUT}user_features/")
-    destinations_df = download_parquet_from_s3(f"{S3_INPUT}destination_features/")
-    interactions_df = download_parquet_from_s3(f"{S3_INPUT}interaction_matrix/")
+    users_df        = download_parquet_from_s3(f"{S3_INPUT}profile/")
+    destinations_df = download_parquet_from_s3(f"{S3_INPUT}destinasi/")
+    interactions_df = download_parquet_from_s3(f"{S3_INPUT}interaction/")
     print(f"  Users       : {len(users_df)} baris")
     print(f"  Destinations: {len(destinations_df)} baris")
     print(f"  Interactions: {len(interactions_df)} baris")
@@ -91,6 +91,25 @@ except Exception as e:
     users_df        = pd.read_csv("dataset/user_profiles.csv")
     destinations_df = pd.read_csv("dataset/destination_catalog.csv")
     interactions_df = pd.read_csv("dataset/user_interactions.csv")
+
+# ── Validasi: hentikan script jika data kosong ────────────────────────────────
+_missing = []
+if len(users_df) == 0:
+    _missing.append(f"  • profile/      → {S3_INPUT}profile/")
+if len(destinations_df) == 0:
+    _missing.append(f"  • destinasi/    → {S3_INPUT}destinasi/")
+if len(interactions_df) == 0:
+    _missing.append(f"  • interaction/  → {S3_INPUT}interaction/")
+
+if _missing:
+    print("\n❌ DATA KOSONG — training dibatalkan.")
+    print("   Pastikan file .parquet sudah ada di path S3 berikut:")
+    for m in _missing:
+        print(m)
+    print("\n   Cek isi bucket dengan perintah:")
+    print(f"   aws s3 ls s3://{S3_BUCKET}/processed_data/ --recursive")
+    print("\n   Jalankan dulu script ETL/preprocessing sebelum training.")
+    raise SystemExit(1)
 
 
 # ════════════════════════════════════════════════════════════════

@@ -57,7 +57,7 @@ def load_model():
             now - _model_loaded_at < MODEL_CACHE_TTL):
         return _model_cache
 
-    bucket = os.environ.get("S3_BUCKET", "nusantaraai-ml-jawatengah-namakamu")
+    bucket = os.environ.get("S3_BUCKET", "nusantara-ai")
     key    = os.environ.get("MODEL_KEY", "models/hybrid_model.pkl")
     local  = "/tmp/hybrid_model.pkl"
 
