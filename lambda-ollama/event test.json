@@ -1,0 +1,22 @@
+{
+  "httpMethod": "POST",
+  "body": "{\"user_id\": \"user_123\", \"top_n\": 5, \"user_preferences\": {\"favorit_destinasi\": [\"DST001\", \"DST010\"]}}"
+}
+
+{
+  "httpMethod": "GET"
+}
+
+{
+  "requestContext": {
+    "http": {
+      "method": "POST"
+    }
+  },
+  "rawPath": "/recommend",
+  "body": "{\"user_id\": \"user_123\", \"top_n\": 5}"
+}
+
+curl -X POST http://50.17.116.104:8000/recommend \
+     -H "Content-Type: application/json" \
+     -d '{"user_id": "USR00001", "top_n": 5, "narasi": true}'
